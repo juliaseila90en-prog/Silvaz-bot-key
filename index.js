@@ -1,6 +1,5 @@
 // ============================================
-// SILVAZ KEY BOT - VERSÃO CORRIGIDA
-// ROTA: /auth (NÃO /auth/login)
+// SILVAZ KEY BOT - VERSÃO FORMULARIO
 // ============================================
 
 const { Client, GatewayIntentBits, EmbedBuilder, Colors } = require('discord.js');
@@ -24,44 +23,50 @@ let sessionCookie = null;
 let sessionExpiry = null;
 
 // ============================================
-// LOGIN - ROTA /auth (sem /login)
+// LOGIN - ENVIA COMO FORMULARIO (URL ENCODED)
 // ============================================
 async function loginSite() {
     try {
-        console.log('🔐 Fazendo login no site via /auth...');
+        console.log('🔐 Fazendo login via /auth (formulário)...');
         console.log(`📧 Email: ${ADMIN_EMAIL}`);
 
-        const response = await axios.post(`${SITE_URL}/auth`, {
-            email: ADMIN_EMAIL,
-            password: ADMIN_PASSWORD
-        }, {
+        // CRIA FORMULARIO
+        const formData = new URLSearchParams();
+        formData.append('email', ADMIN_EMAIL);
+        formData.append('password', ADMIN_PASSWORD);
+
+        const response = await axios.post(`${SITE_URL}/auth`, formData.toString(), {
             headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            },
+            maxRedirects: 5,
+            validateStatus: (status) => status < 400
         });
 
-        console.log('📡 Resposta completa:', JSON.stringify(response.data, null, 2));
+        console.log('📡 Status:', response.status);
 
-        // Verifica se deu certo
-        if (response.data && response.data.success === true) {
+        // Verifica se foi redirecionado (login OK)
+        if (response.status === 302 || response.status === 301) {
+            const location = response.headers.location;
+            console.log(`✅ Redirecionado para: ${location}`);
             if (response.headers['set-cookie']) {
                 sessionCookie = response.headers['set-cookie'].join('; ');
                 sessionExpiry = Date.now() + (3600 * 1000);
                 console.log('✅ Login realizado com sucesso!');
                 return true;
             }
-            if (response.data.token) {
-                sessionCookie = `token=${response.data.token}`;
-                sessionExpiry = Date.now() + (3600 * 1000);
-                console.log('✅ Login realizado com token!');
-                return true;
-            }
-            console.log('⚠️ Login OK mas sem cookie/token');
+        }
+
+        // Verifica se retornou 200 com cookie
+        if (response.status === 200 && response.headers['set-cookie']) {
+            sessionCookie = response.headers['set-cookie'].join('; ');
+            sessionExpiry = Date.now() + (3600 * 1000);
+            console.log('✅ Login realizado (status 200)!');
             return true;
         }
 
-        console.log('❌ Falha no login:', response.data);
+        console.log('❌ Falha no login - status:', response.status);
         return false;
     } catch (error) {
         console.error('❌ Erro no login:', error.message);
@@ -93,11 +98,7 @@ async function authenticatedRequest(method, endpoint, data = null) {
         };
 
         if (sessionCookie) {
-            if (sessionCookie.startsWith('token=')) {
-                headers['Authorization'] = `Bearer ${sessionCookie.replace('token=', '')}`;
-            } else {
-                headers['Cookie'] = sessionCookie;
-            }
+            headers['Cookie'] = sessionCookie;
         }
 
         const config = {
@@ -241,7 +242,7 @@ client.on('interactionCreate', async (interaction) => {
             .setColor(Colors.Purple)
             .addFields(
                 { name: '🌐 Site', value: SITE_URL, inline: true },
-                { name: '📡 Sessão', value: sessionCookie ? '✅' : '❌', inline: true },
+                { name: '📡 Sessão', value: sessionCookie ? '✅ Ativa' : '❌ Inativa', inline: true },
                 { name: '🤖 Bot', value: client.user.tag, inline: true }
             )
             .setTimestamp();
