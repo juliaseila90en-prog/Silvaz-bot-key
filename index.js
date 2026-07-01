@@ -1,8 +1,8 @@
 // ============================================
-// SILVAZ KEY BOT - SISTEMA DE CARRINHO
+// SILVAZ KEY BOT - SISTEMA COM CANAIS
 // ============================================
 
-const { Client, GatewayIntentBits, EmbedBuilder, Colors, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, Colors, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
 
@@ -17,15 +17,34 @@ if (!TOKEN) {
 
 const SITE_URL = 'https://keyssilvaz.lovable.app';
 const ADMIN_API_KEY = 'sk_admin_jg3607eaWg2z8EBFtvgjNdj9q62NBA0oW4cQbD4J1WBlcQPj';
-const ADMIN_IDS = ['1496993217814728855']; // Coloque seu ID aqui
+const ADMIN_IDS = ['1496993217814728855']; // Coloque seu ID
+
+// IDs dos canais/categorias (você vai preencher depois)
+const CATEGORY_ID = '1521898005341405324'; // Categoria onde os canais serão criados
+const LOG_CHANNEL_ID = '1521898005341405326'; // Canal para logs
+
+// Preços
+const PRICES = {
+    daily: 0.50,
+    weekly: 1.00,
+    monthly: 5.00,
+    lifetime: 10.00
+};
+
+const TYPE_NAMES = {
+    daily: '24 Horas',
+    weekly: '7 Dias',
+    monthly: '30 Dias',
+    lifetime: 'Vitalícia'
+};
 
 // ============================================
-// CARRINHO - PEDIDOS PENDENTES
+// PEDIDOS PENDENTES
 // ============================================
-const pendingOrders = new Map(); // { userId: { type, buyer, timestamp, messageId } }
+const pendingOrders = new Map(); // { userId: { type, buyer, timestamp, channelId } }
 
 // ============================================
-// REQUISIÇÕES COM API KEY
+// REQUISIÇÕES API
 // ============================================
 async function apiRequest(method, endpoint, data = null) {
     try {
@@ -48,9 +67,6 @@ async function apiRequest(method, endpoint, data = null) {
     }
 }
 
-// ============================================
-// FUNÇÕES DA API
-// ============================================
 async function generateKey(type, buyer = null) {
     const data = await apiRequest('POST', '/api/public/generate', {
         type: type,
@@ -61,11 +77,6 @@ async function generateKey(type, buyer = null) {
 
 async function listKeys() {
     const data = await apiRequest('GET', '/api/public/keys');
-    return data;
-}
-
-async function validateKey(key) {
-    const data = await apiRequest('POST', '/api/public/validate-key', { key });
     return data;
 }
 
@@ -86,7 +97,6 @@ client.once('ready', async () => {
     console.log(`🌐 Site: ${SITE_URL}`);
     console.log(`🔑 API Key configurada!`);
     
-    // Testa API
     try {
         await listKeys();
         console.log('✅ Conexão com a API funcionando!');
@@ -94,7 +104,6 @@ client.once('ready', async () => {
         console.log('⚠️ Erro ao testar API:', error.message);
     }
     
-    // Comandos
     await client.application.commands.set([
         {
             name: 'set_painel',
@@ -142,18 +151,18 @@ client.once('ready', async () => {
 });
 
 // ============================================
-// PAINEL - BOTÕES
+// PAINEL
 // ============================================
 function createPanel() {
     const row1 = new ActionRowBuilder()
         .addComponents(
             new ButtonBuilder()
                 .setCustomId('buy_daily')
-                .setLabel('📅 24 Horas - R$5')
+                .setLabel('📅 24H - R$0,50')
                 .setStyle(ButtonStyle.Primary),
             new ButtonBuilder()
                 .setCustomId('buy_weekly')
-                .setLabel('📅 7 Dias - R$15')
+                .setLabel('📅 7D - R$1,00')
                 .setStyle(ButtonStyle.Primary)
         );
     
@@ -161,11 +170,11 @@ function createPanel() {
         .addComponents(
             new ButtonBuilder()
                 .setCustomId('buy_monthly')
-                .setLabel('📅 30 Dias - R$40')
+                .setLabel('📅 30D - R$5,00')
                 .setStyle(ButtonStyle.Primary),
             new ButtonBuilder()
                 .setCustomId('buy_lifetime')
-                .setLabel('♾️ Vitalícia - R$100')
+                .setLabel('♾️ Vitalícia - R$10,00')
                 .setStyle(ButtonStyle.Primary)
         );
     
@@ -180,22 +189,83 @@ function createPanel() {
     const embed = new EmbedBuilder()
         .setTitle('🛒 SILVAZ KEY STORE')
         .setDescription(`
-            **Escolha seu plano abaixo:**
+            **Escolha seu plano:**
 
-            📅 **24 Horas** - R$5
-            📅 **7 Dias** - R$15  
-            📅 **30 Dias** - R$40
-            ♾️ **Vitalícia** - R$100
+            📅 **24 Horas** - R$0,50
+            📅 **7 Dias** - R$1,00
+            📅 **30 Dias** - R$5,00
+            ♾️ **Vitalícia** - R$10,00
 
             💳 **Pagamento:** PIX
 
-            ⏳ Após o pagamento, aguarde a confirmação do admin.
+            ⏳ Após o pagamento, um canal será criado para te atender.
         `)
         .setColor(Colors.Purple)
         .setFooter({ text: 'SILVAZ KEY STORE' })
         .setTimestamp();
     
     return { embeds: [embed], components: [row1, row2, row3] };
+}
+
+// ============================================
+// CRIAR CANAL DE ATENDIMENTO
+// ============================================
+async function createTicketChannel(interaction, type, userName, userId) {
+    const guild = interaction.guild;
+    const category = guild.channels.cache.get(CATEGORY_ID);
+    
+    const channelName = `ticket-${userName.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    
+    const channel = await guild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
+        parent: category || undefined,
+        permissionOverwrites: [
+            {
+                id: guild.id,
+                deny: [PermissionFlagsBits.ViewChannel],
+            },
+            {
+                id: userId,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles],
+            },
+            {
+                id: interaction.client.user.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels],
+            },
+            ...ADMIN_IDS.map(adminId => ({
+                id: adminId,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels],
+            }))
+        ]
+    });
+    
+    const price = PRICES[type] || 0;
+    const typeName = TYPE_NAMES[type] || type;
+    
+    const embed = new EmbedBuilder()
+        .setTitle('🎫 Ticket de Atendimento')
+        .setDescription(`
+            **Bem-vindo ao seu atendimento!** 👋
+
+            **Plano:** ${typeName}
+            **Valor:** R$${price.toFixed(2)}
+            **Comprador:** ${userName}
+
+            📤 **Envie o comprovante do pagamento aqui.**
+            ⏳ Aguarde o admin confirmar.
+
+            💰 **Chave PIX:** (coloque sua chave aqui)
+        `)
+        .setColor(Colors.Green)
+        .setTimestamp();
+    
+    await channel.send({
+        content: `<@${userId}> | ${ADMIN_IDS.map(id => `<@${id}>`).join(' ')}`,
+        embeds: [embed]
+    });
+    
+    return channel;
 }
 
 // ============================================
@@ -209,7 +279,7 @@ client.on('interactionCreate', async (interaction) => {
         const userId = interaction.user.id;
         const userName = interaction.user.username;
         
-        // AJUDA PIX
+        // HELP PIX
         if (interaction.customId === 'help_pix') {
             const embed = new EmbedBuilder()
                 .setTitle('💰 Como pagar?')
@@ -217,13 +287,13 @@ client.on('interactionCreate', async (interaction) => {
                     **Pague via PIX:**
 
                     📱 **Chave PIX:** (coloque sua chave aqui)
-                    🏦 **Banco:** (nome do banco)
                     👤 **Titular:** (seu nome)
 
                     ⚠️ **Após o pagamento:**
-                    1️⃣ Envie o comprovante no chat
-                    2️⃣ O admin vai confirmar
-                    3️⃣ Você recebe sua key no PV!
+                    1️⃣ Um canal será criado para você
+                    2️⃣ Envie o comprovante no canal
+                    3️⃣ O admin vai confirmar
+                    4️⃣ Você recebe sua key no PV!
                 `)
                 .setColor(Colors.Green)
                 .setTimestamp();
@@ -245,46 +315,40 @@ client.on('interactionCreate', async (interaction) => {
                 return;
             }
             
-            // Salva pedido
-            pendingOrders.set(userId, {
-                type: type,
-                buyer: userName,
-                timestamp: Date.now()
-            });
+            await interaction.reply({ content: '⏳ Criando seu canal de atendimento...', ephemeral: true });
             
-            const typeNames = {
-                daily: '24 Horas - R$5',
-                weekly: '7 Dias - R$15',
-                monthly: '30 Dias - R$40',
-                lifetime: 'Vitalícia - R$100'
-            };
-            
-            const embed = new EmbedBuilder()
-                .setTitle('🛒 Pedido Registrado!')
-                .setDescription(`
-                    **Tipo:** ${typeNames[type]}
-                    **Comprador:** ${userName}
-                    
-                    📤 **Envie o comprovante de pagamento aqui no chat**
-                    ⏳ Aguarde o admin confirmar
-                `)
-                .setColor(Colors.Green)
-                .setTimestamp();
-            
-            await interaction.reply({ embeds: [embed], ephemeral: true });
-            
-            // Avisa os admins
-            for (const adminId of ADMIN_IDS) {
-                const admin = await client.users.fetch(adminId).catch(() => null);
-                if (admin) {
-                    await admin.send({
-                        content: `🔔 **NOVO PEDIDO!**
-                        Usuário: ${userName} (<@${userId}>)
-                        Tipo: ${typeNames[type]}
-
-                        Use: /confirmar @${userName}`
-                    }).catch(() => {});
+            try {
+                // Cria canal de atendimento
+                const channel = await createTicketChannel(interaction, type, userName, userId);
+                
+                // Salva pedido
+                pendingOrders.set(userId, {
+                    type: type,
+                    buyer: userName,
+                    timestamp: Date.now(),
+                    channelId: channel.id
+                });
+                
+                const typeName = TYPE_NAMES[type];
+                const price = PRICES[type];
+                
+                await interaction.editReply({
+                    content: `✅ Canal criado! Acesse: ${channel}\n📦 Plano: ${typeName} - R$${price.toFixed(2)}`
+                });
+                
+                // Log
+                if (LOG_CHANNEL_ID) {
+                    const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
+                    if (logChannel) {
+                        await logChannel.send({
+                            content: `🔔 **NOVO TICKET**\n👤 ${userName}\n📦 ${typeName}\n📌 ${channel}`
+                        });
+                    }
                 }
+                
+            } catch (error) {
+                console.error('Erro ao criar canal:', error);
+                await interaction.editReply({ content: `❌ Erro ao criar canal: ${error.message}` });
             }
             return;
         }
@@ -296,12 +360,10 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.isCommand()) return;
     
     const { commandName } = interaction;
-    
-    // VERIFICA ADMIN
     const isAdmin = ADMIN_IDS.includes(interaction.user.id);
     
     // ========================================
-    // /set_painel - ADMIN
+    // /set_painel
     // ========================================
     if (commandName === 'set_painel') {
         if (!isAdmin) {
@@ -316,7 +378,7 @@ client.on('interactionCreate', async (interaction) => {
     }
     
     // ========================================
-    // /confirmar - ADMIN
+    // /confirmar
     // ========================================
     if (commandName === 'confirmar') {
         if (!isAdmin) {
@@ -343,28 +405,40 @@ client.on('interactionCreate', async (interaction) => {
             const keyValue = result.key || result.key_value || result.code || 'N/A';
             const expiresAt = result.expires_at || result.expiry || 'N/A';
             
+            // Fecha o canal
+            if (order.channelId) {
+                const channel = interaction.guild.channels.cache.get(order.channelId);
+                if (channel) {
+                    await channel.send({
+                        content: `✅ **Pedido confirmado!** Key enviada no PV de ${usuario.username}.`
+                    });
+                    setTimeout(async () => {
+                        try {
+                            await channel.delete();
+                            console.log(`🗑️ Canal ${channel.name} deletado.`);
+                        } catch (e) {
+                            console.log('Erro ao deletar canal:', e);
+                        }
+                    }, 5000);
+                }
+            }
+            
             pendingOrders.delete(userId);
             
-            const typeNames = {
-                daily: '24 Horas',
-                weekly: '7 Dias',
-                monthly: '30 Dias',
-                lifetime: 'Vitalícia'
-            };
+            const typeName = TYPE_NAMES[order.type] || order.type;
             
             const embed = new EmbedBuilder()
                 .setTitle('🎉 Sua Key foi gerada!')
                 .setDescription(`\`\`\`${keyValue}\`\`\``)
                 .setColor(Colors.Purple)
                 .addFields(
-                    { name: '📅 Tipo', value: typeNames[order.type] || order.type, inline: true },
+                    { name: '📅 Tipo', value: typeName, inline: true },
                     { name: '👤 Comprador', value: order.buyer, inline: true },
                     { name: '⏰ Expira', value: new Date(expiresAt).toLocaleString('pt-BR'), inline: true }
                 )
                 .setFooter({ text: 'SILVAZ KEY STORE' })
                 .setTimestamp();
             
-            // Envia PV
             try {
                 await usuario.send({ embeds: [embed] });
                 await interaction.editReply({ content: `✅ Key enviada para ${usuario.username}!` });
@@ -374,6 +448,16 @@ client.on('interactionCreate', async (interaction) => {
                 });
             }
             
+            // Log
+            if (LOG_CHANNEL_ID) {
+                const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
+                if (logChannel) {
+                    await logChannel.send({
+                        content: `✅ **PAGAMENTO CONFIRMADO**\n👤 ${usuario.username}\n📦 ${typeName}\n🔑 \`${keyValue}\``
+                    });
+                }
+            }
+            
         } catch (error) {
             await interaction.editReply({ content: `❌ Erro: ${error.message}` });
         }
@@ -381,7 +465,7 @@ client.on('interactionCreate', async (interaction) => {
     }
     
     // ========================================
-    // /cancelar - ADMIN
+    // /cancelar
     // ========================================
     if (commandName === 'cancelar') {
         if (!isAdmin) {
@@ -400,6 +484,23 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
         
+        const order = pendingOrders.get(userId);
+        
+        // Fecha o canal
+        if (order.channelId) {
+            const channel = interaction.guild.channels.cache.get(order.channelId);
+            if (channel) {
+                await channel.send({
+                    content: `❌ **Pedido cancelado!**`
+                });
+                setTimeout(async () => {
+                    try {
+                        await channel.delete();
+                    } catch (e) {}
+                }, 3000);
+            }
+        }
+        
         pendingOrders.delete(userId);
         await interaction.reply({
             content: `✅ Pedido de ${usuario.username} cancelado!`,
@@ -409,7 +510,7 @@ client.on('interactionCreate', async (interaction) => {
     }
     
     // ========================================
-    // /pendentes - ADMIN
+    // /pendentes
     // ========================================
     if (commandName === 'pendentes') {
         if (!isAdmin) {
@@ -426,14 +527,9 @@ client.on('interactionCreate', async (interaction) => {
         for (const [userId, order] of pendingOrders) {
             const user = await client.users.fetch(userId).catch(() => null);
             const userName = user ? user.username : 'Desconhecido';
-            const typeNames = {
-                daily: '24 Horas',
-                weekly: '7 Dias',
-                monthly: '30 Dias',
-                lifetime: 'Vitalícia'
-            };
+            const typeName = TYPE_NAMES[order.type] || order.type;
             description += `👤 ${userName}\n`;
-            description += `📦 ${typeNames[order.type] || order.type}\n`;
+            description += `📦 ${typeName}\n`;
             description += `⏰ ${new Date(order.timestamp).toLocaleString('pt-BR')}\n\n`;
         }
         
@@ -448,7 +544,7 @@ client.on('interactionCreate', async (interaction) => {
     }
     
     // ========================================
-    // /keys - ADMIN
+    // /keys
     // ========================================
     if (commandName === 'keys') {
         if (!isAdmin) {
