@@ -1,5 +1,7 @@
 // ============================================
-// SILVAZ KEY BOT - VERSÃO FORMULARIO
+// SILVAZ KEY BOT - VERSÃO FINAL
+// ADMIN_API_KEY: sk_admin_jg3607eaWg2z8EBFtvgjNdj9q62NBA0oW4cQbD4J1WBlcQPj
+// EXPIRA EM: 30 DIAS (720 HORAS)
 // ============================================
 
 const { Client, GatewayIntentBits, EmbedBuilder, Colors } = require('discord.js');
@@ -16,95 +18,29 @@ if (!TOKEN) {
 }
 
 const SITE_URL = 'https://keyssilvaz.lovable.app';
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'rafaelaferraz2102@gmail.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '23816bBb';
+const ADMIN_API_KEY = 'sk_admin_jg3607eaWg2z8EBFtvgjNdj9q62NBA0oW4cQbD4J1WBlcQPj';
 
-let sessionCookie = null;
-let sessionExpiry = null;
+// ⚠️ ATENÇÃO: Esta chave expira em 720 horas (30 dias)!
+// Data de expiração: aproximadamente 31/07/2026
+// Quando expirar, gere uma nova no Lovable e atualize o código!
+
+console.log('🔑 API Key configurada!');
+console.log('⚠️ A chave expira em 30 dias!');
 
 // ============================================
-// LOGIN - ENVIA COMO FORMULARIO (URL ENCODED)
+// REQUISIÇÕES COM API KEY
 // ============================================
-async function loginSite() {
+async function apiRequest(method, endpoint, data = null) {
     try {
-        console.log('🔐 Fazendo login via /auth (formulário)...');
-        console.log(`📧 Email: ${ADMIN_EMAIL}`);
-
-        // CRIA FORMULARIO
-        const formData = new URLSearchParams();
-        formData.append('email', ADMIN_EMAIL);
-        formData.append('password', ADMIN_PASSWORD);
-
-        const response = await axios.post(`${SITE_URL}/auth`, formData.toString(), {
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            },
-            maxRedirects: 5,
-            validateStatus: (status) => status < 400
-        });
-
-        console.log('📡 Status:', response.status);
-
-        // Verifica se foi redirecionado (login OK)
-        if (response.status === 302 || response.status === 301) {
-            const location = response.headers.location;
-            console.log(`✅ Redirecionado para: ${location}`);
-            if (response.headers['set-cookie']) {
-                sessionCookie = response.headers['set-cookie'].join('; ');
-                sessionExpiry = Date.now() + (3600 * 1000);
-                console.log('✅ Login realizado com sucesso!');
-                return true;
-            }
-        }
-
-        // Verifica se retornou 200 com cookie
-        if (response.status === 200 && response.headers['set-cookie']) {
-            sessionCookie = response.headers['set-cookie'].join('; ');
-            sessionExpiry = Date.now() + (3600 * 1000);
-            console.log('✅ Login realizado (status 200)!');
-            return true;
-        }
-
-        console.log('❌ Falha no login - status:', response.status);
-        return false;
-    } catch (error) {
-        console.error('❌ Erro no login:', error.message);
-        if (error.response) {
-            console.error('Status:', error.response.status);
-            console.error('Dados:', error.response.data);
-        }
-        return false;
-    }
-}
-
-// ============================================
-// REQUISIÇÕES AUTENTICADAS
-// ============================================
-async function ensureSession() {
-    if (!sessionCookie || Date.now() > sessionExpiry) {
-        return await loginSite();
-    }
-    return true;
-}
-
-async function authenticatedRequest(method, endpoint, data = null) {
-    await ensureSession();
-    
-    try {
-        const headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        };
-
-        if (sessionCookie) {
-            headers['Cookie'] = sessionCookie;
-        }
-
+        console.log(`📡 ${method} ${endpoint}`);
+        
         const config = {
             method: method,
             url: `${SITE_URL}${endpoint}`,
-            headers: headers
+            headers: {
+                'Content-Type': 'application/json',
+                'x-admin-key': ADMIN_API_KEY
+            }
         };
         
         if (data && (method === 'POST' || method === 'PUT' || method === 'DELETE')) {
@@ -112,11 +48,13 @@ async function authenticatedRequest(method, endpoint, data = null) {
         }
         
         const response = await axios(config);
+        console.log(`✅ Sucesso em ${endpoint}`);
         return response.data;
     } catch (error) {
-        if (error.response && error.response.status === 401) {
-            await loginSite();
-            return authenticatedRequest(method, endpoint, data);
+        console.error(`❌ Erro em ${endpoint}:`, error.message);
+        if (error.response) {
+            console.error('Status:', error.response.status);
+            console.error('Dados:', error.response.data);
         }
         throw error;
     }
@@ -126,7 +64,7 @@ async function authenticatedRequest(method, endpoint, data = null) {
 // FUNÇÕES DA API
 // ============================================
 async function generateKey(type, buyer = null) {
-    const data = await authenticatedRequest('POST', '/admin/generate', {
+    const data = await apiRequest('POST', '/api/public/generate', {
         type: type,
         buyer: buyer || 'Discord Bot'
     });
@@ -134,17 +72,12 @@ async function generateKey(type, buyer = null) {
 }
 
 async function listKeys() {
-    const data = await authenticatedRequest('GET', '/admin/keys');
+    const data = await apiRequest('GET', '/api/public/keys');
     return data;
 }
 
-async function banKey(key) {
-    const data = await authenticatedRequest('POST', '/admin/ban', { key });
-    return data;
-}
-
-async function removeKey(key) {
-    const data = await authenticatedRequest('DELETE', '/admin/remove', { key });
+async function validateKey(key) {
+    const data = await apiRequest('POST', '/api/public/validate-key', { key });
     return data;
 }
 
@@ -163,8 +96,16 @@ const client = new Client({
 client.once('ready', async () => {
     console.log(`✅ Bot logado como ${client.user.tag}`);
     console.log(`🌐 Site: ${SITE_URL}`);
+    console.log(`🔑 API Key: ${ADMIN_API_KEY.substring(0, 15)}...`);
+    console.log(`⚠️ Expira em 30 dias!`);
     
-    await loginSite();
+    // Testa conexão com a API
+    try {
+        await listKeys();
+        console.log('✅ Conexão com a API funcionando!');
+    } catch (error) {
+        console.log('⚠️ Erro ao testar API:', error.message);
+    }
     
     await client.application.commands.set([
         {
@@ -196,24 +137,12 @@ client.once('ready', async () => {
             description: 'Listar todas as keys'
         },
         {
-            name: 'banir',
-            description: 'Banir uma key',
+            name: 'validar',
+            description: 'Validar uma key SILVAZ',
             options: [
                 {
                     name: 'key',
-                    description: 'Key a ser banida',
-                    type: 3,
-                    required: true
-                }
-            ]
-        },
-        {
-            name: 'remover',
-            description: 'Remover uma key',
-            options: [
-                {
-                    name: 'key',
-                    description: 'Key a ser removida',
+                    description: 'Key a ser validada',
                     type: 3,
                     required: true
                 }
@@ -242,7 +171,8 @@ client.on('interactionCreate', async (interaction) => {
             .setColor(Colors.Purple)
             .addFields(
                 { name: '🌐 Site', value: SITE_URL, inline: true },
-                { name: '📡 Sessão', value: sessionCookie ? '✅ Ativa' : '❌ Inativa', inline: true },
+                { name: '🔑 API Key', value: '✅ Configurada', inline: true },
+                { name: '⏰ Expira', value: '30 dias', inline: true },
                 { name: '🤖 Bot', value: client.user.tag, inline: true }
             )
             .setTimestamp();
@@ -254,7 +184,7 @@ client.on('interactionCreate', async (interaction) => {
         const tipo = interaction.options.getString('tipo');
         const comprador = interaction.options.getString('comprador') || 'Não informado';
         
-        await interaction.reply({ content: '⏳ Gerando...', ephemeral: true });
+        await interaction.reply({ content: '⏳ Gerando key...', ephemeral: true });
         
         try {
             const result = await generateKey(tipo, comprador);
@@ -270,13 +200,13 @@ client.on('interactionCreate', async (interaction) => {
             const expiresAt = result.expires_at || result.expiry || 'N/A';
             
             const embed = new EmbedBuilder()
-                .setTitle('🔑 Key gerada!')
+                .setTitle('🔑 Key gerada com sucesso!')
                 .setColor(Colors.Purple)
                 .setDescription(`\`\`\`${keyValue}\`\`\``)
                 .addFields(
                     { name: '📅 Tipo', value: typeNames[tipo] || tipo, inline: true },
                     { name: '👤 Comprador', value: comprador, inline: true },
-                    { name: '⏰ Expira', value: new Date(expiresAt).toLocaleString('pt-BR'), inline: true }
+                    { name: '⏰ Expira', value: expiresAt !== 'N/A' ? new Date(expiresAt).toLocaleString('pt-BR') : 'N/A', inline: true }
                 )
                 .setTimestamp();
             
@@ -288,7 +218,7 @@ client.on('interactionCreate', async (interaction) => {
     }
     
     if (commandName === 'keys') {
-        await interaction.reply({ content: '⏳ Carregando...', ephemeral: true });
+        await interaction.reply({ content: '⏳ Carregando keys...', ephemeral: true });
         
         try {
             const data = await listKeys();
@@ -296,7 +226,7 @@ client.on('interactionCreate', async (interaction) => {
             
             if (keys.length === 0) {
                 const embed = new EmbedBuilder()
-                    .setTitle('📋 Lista')
+                    .setTitle('📋 Lista de Keys')
                     .setDescription('Nenhuma key encontrada.')
                     .setColor(Colors.Orange)
                     .setTimestamp();
@@ -323,10 +253,10 @@ client.on('interactionCreate', async (interaction) => {
             }
             
             const embed = new EmbedBuilder()
-                .setTitle('📋 Keys')
+                .setTitle('📋 Lista de Keys')
                 .setDescription(description)
                 .setColor(Colors.Purple)
-                .setFooter({ text: `Total: ${keys.length}` })
+                .setFooter({ text: `Total: ${keys.length} keys` })
                 .setTimestamp();
             
             await interaction.editReply({ content: null, embeds: [embed] });
@@ -336,33 +266,28 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     
-    if (commandName === 'banir') {
+    if (commandName === 'validar') {
         const key = interaction.options.getString('key');
-        await interaction.reply({ content: `⏳ Banindo...`, ephemeral: true });
+        
+        await interaction.reply({ content: `⏳ Validando key...`, ephemeral: true });
+        
         try {
-            await banKey(key);
+            const result = await validateKey(key);
+            
+            const isValid = result.valid || result.isValid || result.status === 'active';
+            const status = result.status || result.message || (isValid ? '✅ Válida' : '❌ Inválida');
+            
             const embed = new EmbedBuilder()
-                .setTitle('🚫 Banida!')
+                .setTitle(isValid ? '✅ Key Válida!' : '❌ Key Inválida!')
                 .setDescription(`Key: \`${key}\``)
-                .setColor(Colors.Red)
+                .addFields(
+                    { name: '📊 Status', value: status, inline: true },
+                    { name: '👤 Comprador', value: result.buyer || result.comprador || 'N/A', inline: true },
+                    { name: '⏰ Expira', value: result.expires_at || result.expiry || 'N/A', inline: true }
+                )
+                .setColor(isValid ? Colors.Green : Colors.Red)
                 .setTimestamp();
-            await interaction.editReply({ content: null, embeds: [embed] });
-        } catch (error) {
-            await interaction.editReply({ content: `❌ Erro: ${error.message}` });
-        }
-        return;
-    }
-    
-    if (commandName === 'remover') {
-        const key = interaction.options.getString('key');
-        await interaction.reply({ content: `⏳ Removendo...`, ephemeral: true });
-        try {
-            await removeKey(key);
-            const embed = new EmbedBuilder()
-                .setTitle('🗑️ Removida!')
-                .setDescription(`Key: \`${key}\``)
-                .setColor(Colors.Orange)
-                .setTimestamp();
+            
             await interaction.editReply({ content: null, embeds: [embed] });
         } catch (error) {
             await interaction.editReply({ content: `❌ Erro: ${error.message}` });
@@ -372,26 +297,19 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ============================================
-// MANTER SESSÃO
-// ============================================
-setInterval(async () => {
-    if (sessionCookie && Date.now() > sessionExpiry) {
-        await loginSite();
-    }
-}, 300000);
-
-// ============================================
 // SERVIDOR WEB
 // ============================================
 const app = express();
-app.get('/', (req, res) => res.send('✅ ONLINE!'));
+app.get('/', (req, res) => res.send('✅ SILVAZ KEY BOT - ONLINE!'));
 app.get('/ping', (req, res) => res.send('pong'));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🌐 Servidor na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🌐 Servidor rodando na porta ${PORT}`));
 
 // ============================================
 // INICIAR
 // ============================================
 client.login(TOKEN);
 console.log('🚀 SILVAZ KEY BOT - Iniciado!');
+console.log('📌 Comandos: /gerar, /keys, /validar, /status');
+console.log('⚠️ ADMIN_API_KEY expira em 30 dias!');
