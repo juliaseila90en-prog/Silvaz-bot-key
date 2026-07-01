@@ -1,5 +1,6 @@
 // ============================================
-// SILVAZ KEY BOT - COMPLETO E CORRIGIDO
+// SILVAZ KEY BOT - VERSÃO CORRIGIDA
+// ROTA: /auth (NÃO /auth/login)
 // ============================================
 
 const { Client, GatewayIntentBits, EmbedBuilder, Colors } = require('discord.js');
@@ -7,12 +8,11 @@ const axios = require('axios');
 const express = require('express');
 
 // ============================================
-// CONFIGURAÇÃO - VARIÁVEIS DE AMBIENTE
+// CONFIGURAÇÃO
 // ============================================
 const TOKEN = process.env.TOKEN;
 if (!TOKEN) {
     console.error('❌ ERRO: Token não configurado!');
-    console.log('Adicione TOKEN nas variáveis de ambiente do Render');
     process.exit(1);
 }
 
@@ -20,46 +20,61 @@ const SITE_URL = 'https://keyssilvaz.lovable.app';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'rafaelaferraz2102@gmail.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '23816bBb';
 
-// ============================================
-// COOKIE DE SESSÃO
-// ============================================
 let sessionCookie = null;
 let sessionExpiry = null;
 
 // ============================================
-// FUNÇÃO PARA FAZER LOGIN NO SITE
+// LOGIN - ROTA /auth (sem /login)
 // ============================================
 async function loginSite() {
     try {
-        console.log('🔐 Fazendo login no site...');
-        const response = await axios.post(`${SITE_URL}/api/login`, {
+        console.log('🔐 Fazendo login no site via /auth...');
+        console.log(`📧 Email: ${ADMIN_EMAIL}`);
+
+        const response = await axios.post(`${SITE_URL}/auth`, {
             email: ADMIN_EMAIL,
             password: ADMIN_PASSWORD
         }, {
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
             }
         });
 
-        if (response.data && response.data.success) {
-            const cookies = response.headers['set-cookie'];
-            if (cookies) {
-                sessionCookie = cookies.join('; ');
+        console.log('📡 Resposta completa:', JSON.stringify(response.data, null, 2));
+
+        // Verifica se deu certo
+        if (response.data && response.data.success === true) {
+            if (response.headers['set-cookie']) {
+                sessionCookie = response.headers['set-cookie'].join('; ');
                 sessionExpiry = Date.now() + (3600 * 1000);
-                console.log('✅ Login no site realizado com sucesso!');
+                console.log('✅ Login realizado com sucesso!');
                 return true;
             }
+            if (response.data.token) {
+                sessionCookie = `token=${response.data.token}`;
+                sessionExpiry = Date.now() + (3600 * 1000);
+                console.log('✅ Login realizado com token!');
+                return true;
+            }
+            console.log('⚠️ Login OK mas sem cookie/token');
+            return true;
         }
+
         console.log('❌ Falha no login:', response.data);
         return false;
     } catch (error) {
-        console.error('❌ Erro ao fazer login no site:', error.message);
+        console.error('❌ Erro no login:', error.message);
+        if (error.response) {
+            console.error('Status:', error.response.status);
+            console.error('Dados:', error.response.data);
+        }
         return false;
     }
 }
 
 // ============================================
-// FUNÇÃO PARA VERIFICAR SESSÃO
+// REQUISIÇÕES AUTENTICADAS
 // ============================================
 async function ensureSession() {
     if (!sessionCookie || Date.now() > sessionExpiry) {
@@ -68,20 +83,27 @@ async function ensureSession() {
     return true;
 }
 
-// ============================================
-// FUNÇÃO PARA FAZER REQUISIÇÕES AUTENTICADAS
-// ============================================
 async function authenticatedRequest(method, endpoint, data = null) {
     await ensureSession();
     
     try {
+        const headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        };
+
+        if (sessionCookie) {
+            if (sessionCookie.startsWith('token=')) {
+                headers['Authorization'] = `Bearer ${sessionCookie.replace('token=', '')}`;
+            } else {
+                headers['Cookie'] = sessionCookie;
+            }
+        }
+
         const config = {
             method: method,
             url: `${SITE_URL}${endpoint}`,
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': sessionCookie || ''
-            }
+            headers: headers
         };
         
         if (data && (method === 'POST' || method === 'PUT' || method === 'DELETE')) {
@@ -100,10 +122,10 @@ async function authenticatedRequest(method, endpoint, data = null) {
 }
 
 // ============================================
-// FUNÇÕES DE API
+// FUNÇÕES DA API
 // ============================================
 async function generateKey(type, buyer = null) {
-    const data = await authenticatedRequest('POST', '/api/generate', {
+    const data = await authenticatedRequest('POST', '/admin/generate', {
         type: type,
         buyer: buyer || 'Discord Bot'
     });
@@ -111,22 +133,22 @@ async function generateKey(type, buyer = null) {
 }
 
 async function listKeys() {
-    const data = await authenticatedRequest('GET', '/api/keys');
+    const data = await authenticatedRequest('GET', '/admin/keys');
     return data;
 }
 
 async function banKey(key) {
-    const data = await authenticatedRequest('POST', '/api/ban', { key });
+    const data = await authenticatedRequest('POST', '/admin/ban', { key });
     return data;
 }
 
 async function removeKey(key) {
-    const data = await authenticatedRequest('DELETE', '/api/remove', { key });
+    const data = await authenticatedRequest('DELETE', '/admin/remove', { key });
     return data;
 }
 
 // ============================================
-// INICIALIZAR BOT
+// BOT
 // ============================================
 const client = new Client({
     intents: [
@@ -139,11 +161,11 @@ const client = new Client({
 
 client.once('ready', async () => {
     console.log(`✅ Bot logado como ${client.user.tag}`);
-    console.log(`🌐 Conectando ao site: ${SITE_URL}`);
+    console.log(`🌐 Site: ${SITE_URL}`);
     
     await loginSite();
     
-    client.application.commands.set([
+    await client.application.commands.set([
         {
             name: 'gerar',
             description: 'Gerar uma nova key SILVAZ',
@@ -162,7 +184,7 @@ client.once('ready', async () => {
                 },
                 {
                     name: 'comprador',
-                    description: 'Nome do comprador (opcional)',
+                    description: 'Nome do comprador',
                     type: 3,
                     required: false
                 }
@@ -186,7 +208,7 @@ client.once('ready', async () => {
         },
         {
             name: 'remover',
-            description: 'Remover uma key permanentemente',
+            description: 'Remover uma key',
             options: [
                 {
                     name: 'key',
@@ -198,9 +220,11 @@ client.once('ready', async () => {
         },
         {
             name: 'status',
-            description: 'Verificar status da conexão com o site'
+            description: 'Status da conexão'
         }
     ]);
+    
+    console.log('📌 Comandos registrados!');
 });
 
 // ============================================
@@ -213,15 +237,14 @@ client.on('interactionCreate', async (interaction) => {
     
     if (commandName === 'status') {
         const embed = new EmbedBuilder()
-            .setTitle('🔌 Status da Conexão')
+            .setTitle('🔌 Status')
             .setColor(Colors.Purple)
             .addFields(
                 { name: '🌐 Site', value: SITE_URL, inline: true },
-                { name: '📡 Sessão', value: sessionCookie ? '✅ Ativa' : '❌ Inativa', inline: true },
-                { name: '👤 Admin', value: ADMIN_EMAIL, inline: true }
+                { name: '📡 Sessão', value: sessionCookie ? '✅' : '❌', inline: true },
+                { name: '🤖 Bot', value: client.user.tag, inline: true }
             )
             .setTimestamp();
-        
         await interaction.reply({ embeds: [embed], ephemeral: true });
         return;
     }
@@ -230,7 +253,7 @@ client.on('interactionCreate', async (interaction) => {
         const tipo = interaction.options.getString('tipo');
         const comprador = interaction.options.getString('comprador') || 'Não informado';
         
-        await interaction.reply({ content: '⏳ Gerando key...', ephemeral: true });
+        await interaction.reply({ content: '⏳ Gerando...', ephemeral: true });
         
         try {
             const result = await generateKey(tipo, comprador);
@@ -242,17 +265,18 @@ client.on('interactionCreate', async (interaction) => {
                 lifetime: 'Vitalícia'
             };
             
+            const keyValue = result.key || result.key_value || result.code || 'N/A';
+            const expiresAt = result.expires_at || result.expiry || 'N/A';
+            
             const embed = new EmbedBuilder()
-                .setTitle('🔑 Key gerada com sucesso!')
+                .setTitle('🔑 Key gerada!')
                 .setColor(Colors.Purple)
-                .setDescription(`\`\`\`${result.key}\`\`\``)
+                .setDescription(`\`\`\`${keyValue}\`\`\``)
                 .addFields(
-                    { name: '📅 Tipo', value: typeNames[tipo], inline: true },
+                    { name: '📅 Tipo', value: typeNames[tipo] || tipo, inline: true },
                     { name: '👤 Comprador', value: comprador, inline: true },
-                    { name: '⏰ Expira', value: new Date(result.expires_at).toLocaleString(), inline: true },
-                    { name: '📊 Status', value: '🟢 Ativa', inline: true }
+                    { name: '⏰ Expira', value: new Date(expiresAt).toLocaleString('pt-BR'), inline: true }
                 )
-                .setFooter({ text: 'SILVAZ KEY GENERATOR' })
                 .setTimestamp();
             
             await interaction.editReply({ content: null, embeds: [embed] });
@@ -263,15 +287,15 @@ client.on('interactionCreate', async (interaction) => {
     }
     
     if (commandName === 'keys') {
-        await interaction.reply({ content: '⏳ Carregando keys...', ephemeral: true });
+        await interaction.reply({ content: '⏳ Carregando...', ephemeral: true });
         
         try {
             const data = await listKeys();
-            const keys = data.keys || [];
+            const keys = data.keys || data.data || [];
             
             if (keys.length === 0) {
                 const embed = new EmbedBuilder()
-                    .setTitle('📋 Lista de Keys')
+                    .setTitle('📋 Lista')
                     .setDescription('Nenhuma key encontrada.')
                     .setColor(Colors.Orange)
                     .setTimestamp();
@@ -280,28 +304,28 @@ client.on('interactionCreate', async (interaction) => {
             }
             
             let description = '';
-            const activeKeys = keys.filter(k => k.status === 'active');
-            const expiredKeys = keys.filter(k => k.status === 'expired');
-            const bannedKeys = keys.filter(k => k.status === 'banned');
+            const active = keys.filter(k => k.status === 'active' || k.status === 'ativa');
+            const expired = keys.filter(k => k.status === 'expired' || k.status === 'expirada');
+            const banned = keys.filter(k => k.status === 'banned' || k.status === 'banida');
             
-            description += `📊 **Resumo:**\n`;
-            description += `🟢 Ativas: ${activeKeys.length}\n`;
-            description += `🟠 Expiradas: ${expiredKeys.length}\n`;
-            description += `🔴 Banidas: ${bannedKeys.length}\n\n`;
+            description += `🟢 Ativas: ${active.length}\n`;
+            description += `🟠 Expiradas: ${expired.length}\n`;
+            description += `🔴 Banidas: ${banned.length}\n\n`;
             
-            description += `📌 **Últimas 10 Keys:**\n`;
-            const recentKeys = keys.slice(-10).reverse();
-            for (const k of recentKeys) {
-                const statusIcon = k.status === 'active' ? '🟢' : k.status === 'expired' ? '🟠' : '🔴';
-                const buyer = k.buyer || 'N/A';
-                description += `${statusIcon} \`${k.key_value}\` - ${buyer} (${k.type})\n`;
+            const recent = keys.slice(-10).reverse();
+            for (const k of recent) {
+                const keyVal = k.key || k.key_value || k.code || 'N/A';
+                const icon = (k.status === 'active' || k.status === 'ativa') ? '🟢' : 
+                            (k.status === 'expired' || k.status === 'expirada') ? '🟠' : '🔴';
+                const buyer = k.buyer || k.comprador || 'N/A';
+                description += `${icon} \`${keyVal}\` - ${buyer}\n`;
             }
             
             const embed = new EmbedBuilder()
-                .setTitle('📋 Lista de Keys')
+                .setTitle('📋 Keys')
                 .setDescription(description)
                 .setColor(Colors.Purple)
-                .setFooter({ text: `Total: ${keys.length} keys` })
+                .setFooter({ text: `Total: ${keys.length}` })
                 .setTimestamp();
             
             await interaction.editReply({ content: null, embeds: [embed] });
@@ -313,18 +337,14 @@ client.on('interactionCreate', async (interaction) => {
     
     if (commandName === 'banir') {
         const key = interaction.options.getString('key');
-        
-        await interaction.reply({ content: `⏳ Banindo key ${key}...`, ephemeral: true });
-        
+        await interaction.reply({ content: `⏳ Banindo...`, ephemeral: true });
         try {
             await banKey(key);
-            
             const embed = new EmbedBuilder()
-                .setTitle('🚫 Key banida com sucesso!')
+                .setTitle('🚫 Banida!')
                 .setDescription(`Key: \`${key}\``)
                 .setColor(Colors.Red)
                 .setTimestamp();
-            
             await interaction.editReply({ content: null, embeds: [embed] });
         } catch (error) {
             await interaction.editReply({ content: `❌ Erro: ${error.message}` });
@@ -334,18 +354,14 @@ client.on('interactionCreate', async (interaction) => {
     
     if (commandName === 'remover') {
         const key = interaction.options.getString('key');
-        
-        await interaction.reply({ content: `⏳ Removendo key ${key}...`, ephemeral: true });
-        
+        await interaction.reply({ content: `⏳ Removendo...`, ephemeral: true });
         try {
             await removeKey(key);
-            
             const embed = new EmbedBuilder()
-                .setTitle('🗑️ Key removida permanentemente!')
+                .setTitle('🗑️ Removida!')
                 .setDescription(`Key: \`${key}\``)
                 .setColor(Colors.Orange)
                 .setTimestamp();
-            
             await interaction.editReply({ content: null, embeds: [embed] });
         } catch (error) {
             await interaction.editReply({ content: `❌ Erro: ${error.message}` });
@@ -355,36 +371,26 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ============================================
-// MANTER SESSÃO ATIVA
+// MANTER SESSÃO
 // ============================================
 setInterval(async () => {
     if (sessionCookie && Date.now() > sessionExpiry) {
-        console.log('🔄 Renovando sessão...');
         await loginSite();
     }
 }, 300000);
 
 // ============================================
-// SERVIDOR WEB PARA MANTER ONLINE
+// SERVIDOR WEB
 // ============================================
 const app = express();
-app.get('/', (req, res) => {
-    res.send('✅ SILVAZ KEY BOT - ONLINE!');
-});
-
-app.get('/ping', (req, res) => {
-    res.send('pong');
-});
+app.get('/', (req, res) => res.send('✅ ONLINE!'));
+app.get('/ping', (req, res) => res.send('pong'));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🌐 Servidor web rodando na porta ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🌐 Servidor na porta ${PORT}`));
 
 // ============================================
-// INICIAR BOT
+// INICIAR
 // ============================================
 client.login(TOKEN);
-
 console.log('🚀 SILVAZ KEY BOT - Iniciado!');
-console.log('📌 Comandos: /gerar, /keys, /banir, /remover, /status');
