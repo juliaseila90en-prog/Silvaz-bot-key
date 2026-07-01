@@ -1,7 +1,7 @@
 {
   "name": "silvaz-key-bot",
   "version": "1.0.0",
-  "description": "SILVAZ KEY BOT",
+  "description": "SILVAZ KEY BOT - Discord Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
