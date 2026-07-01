@@ -1,4 +1,0 @@
-discord.py
-flask
-requests
-# (adicione todas que seu bot usa)
